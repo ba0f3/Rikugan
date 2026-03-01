@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
+import importlib
+
 from .qt_compat import (
     QFrame, QHBoxLayout, QLabel, QWidget, QTimer,
 )
 
 try:
-    import ida_funcs
-    import ida_name
-    import idc
+    ida_funcs = importlib.import_module("ida_funcs")
+    ida_name = importlib.import_module("ida_name")
+    idc = importlib.import_module("idc")
 except ImportError:
     ida_funcs = ida_name = idc = None  # type: ignore[assignment]  # noqa: N816 — outside IDA
 
@@ -83,5 +85,5 @@ class ContextBar(QFrame):
                 self.set_function(name)
             else:
                 self.set_function("—")
-        except (ImportError, AttributeError, TypeError):
-            pass  # IDA API not available (tests/shutdown); timer keeps ticking safely
+        except Exception:
+            pass  # IDA API not available or internal error; timer keeps ticking safely

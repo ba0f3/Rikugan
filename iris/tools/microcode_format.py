@@ -6,13 +6,15 @@ pseudocode extraction, and operand type name resolution.
 
 from __future__ import annotations
 
+import importlib
+
 from ..core.errors import ToolError
 
 _HAS_HEXRAYS = False
 try:
-    import ida_hexrays
-    import ida_lines
-    import ida_name
+    ida_hexrays = importlib.import_module("ida_hexrays")
+    ida_lines = importlib.import_module("ida_lines")
+    ida_name = importlib.import_module("ida_name")
     _HAS_HEXRAYS = True
 except ImportError:
     pass

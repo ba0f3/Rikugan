@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
+import importlib
 from typing import Annotated
 
 from .base import tool
 
 
 try:
-    import idautils
-    import idc
+    idautils = importlib.import_module("idautils")
+    idc = importlib.import_module("idc")
 except ImportError:
     pass
 

@@ -2,16 +2,17 @@
 
 from __future__ import annotations
 
+import importlib
 from typing import Annotated, Optional
 
 from .base import tool
 
 _HAS_HEXRAYS = False
 try:
-    import ida_funcs
-    import ida_hexrays
-    import ida_name
-    import idc
+    ida_funcs = importlib.import_module("ida_funcs")
+    ida_hexrays = importlib.import_module("ida_hexrays")
+    ida_name = importlib.import_module("ida_name")
+    idc = importlib.import_module("idc")
     _HAS_HEXRAYS = True
 except ImportError:
     pass

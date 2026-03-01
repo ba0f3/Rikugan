@@ -13,6 +13,7 @@ Typical workflow for cleaning obfuscated code:
 
 from __future__ import annotations
 
+import importlib
 from typing import Annotated
 
 from ..core.errors import ToolError
@@ -30,9 +31,9 @@ from .microcode_optim import (
 
 _HAS_HEXRAYS = False
 try:
-    import ida_hexrays
-    import ida_funcs
-    import ida_range
+    ida_hexrays = importlib.import_module("ida_hexrays")
+    ida_funcs = importlib.import_module("ida_funcs")
+    ida_range = importlib.import_module("ida_range")
     _HAS_HEXRAYS = True
 except ImportError:
     pass

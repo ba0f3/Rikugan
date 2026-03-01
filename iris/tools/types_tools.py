@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 import json
 from typing import Annotated, List, Optional
 
@@ -10,19 +11,19 @@ from .base import tool
 
 _HAS_HEXRAYS = False
 try:
-    import ida_auto
-    import ida_bytes
-    import ida_hexrays
-    import ida_struct
-    import ida_typeinf
-    import idc
+    ida_auto = importlib.import_module("ida_auto")
+    ida_bytes = importlib.import_module("ida_bytes")
+    ida_hexrays = importlib.import_module("ida_hexrays")
+    ida_struct = importlib.import_module("ida_struct")
+    ida_typeinf = importlib.import_module("ida_typeinf")
+    idc = importlib.import_module("idc")
     _HAS_HEXRAYS = True
 except ImportError:
     pass
 
 # ida_enum was removed in IDA 9.x (enums merged into ida_typeinf).
 try:
-    import ida_enum
+    ida_enum = importlib.import_module("ida_enum")
 except ImportError:
     ida_enum = None  # type: ignore[assignment]
 

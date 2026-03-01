@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 import os
 from typing import Any, Dict, List, Optional
 
@@ -27,7 +28,7 @@ class OpenAICompatProvider(OpenAIProvider):
     def _get_client(self):
         if self._client is None:
             try:
-                import openai
+                openai = importlib.import_module("openai")
             except ImportError:
                 from ..core.errors import ProviderError
                 raise ProviderError(

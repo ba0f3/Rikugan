@@ -7,6 +7,7 @@ integrate with IDA's Hex-Rays optimization pipeline.  The global
 
 from __future__ import annotations
 
+import importlib
 import textwrap
 from typing import Any, Callable, Dict
 
@@ -14,7 +15,7 @@ from ..core.logging import log_debug
 
 _HAS_HEXRAYS = False
 try:
-    import ida_hexrays
+    ida_hexrays = importlib.import_module("ida_hexrays")
     _HAS_HEXRAYS = True
 except ImportError:
     pass

@@ -2,17 +2,18 @@
 
 from __future__ import annotations
 
+import importlib
 from typing import Annotated, Optional
 
 from ..core.logging import log_debug
 from .base import tool
 
 try:
-    import ida_funcs
-    import ida_gdl
-    import ida_name
-    import idc
-    import idautils
+    ida_funcs = importlib.import_module("ida_funcs")
+    ida_gdl = importlib.import_module("ida_gdl")
+    ida_name = importlib.import_module("ida_name")
+    idc = importlib.import_module("idc")
+    idautils = importlib.import_module("idautils")
 except ImportError:
     pass
 

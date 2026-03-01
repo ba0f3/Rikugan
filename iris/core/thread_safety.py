@@ -2,19 +2,16 @@
 
 from __future__ import annotations
 
-import builtins
-import contextlib
 import functools
 import importlib
 import threading
-import traceback
-from typing import Any, Callable, Generator, TypeVar
+from typing import Any, Callable, TypeVar
 
 F = TypeVar("F", bound=Callable[..., Any])
 
 from ..constants import IDA_AVAILABLE as _IDA_AVAILABLE
 if _IDA_AVAILABLE:
-    import ida_kernwin
+    ida_kernwin = importlib.import_module("ida_kernwin")
 
 
 def _log(msg: str) -> None:
@@ -65,34 +62,6 @@ def idasync(func: F) -> F:
         return result_holder[0] if result_holder else None
 
     return wrapper  # type: ignore[return-value]
-
-
-_shiboken_lock = threading.Lock()
-
-
-@contextlib.contextmanager
-def shiboken_bypass() -> Generator[None, None, None]:
-    """Context manager: temporarily restore CPython's real __import__.
-
-    PySide6/Shiboken patches ``builtins.__import__`` with a hook that can
-    interfere with bulk module imports — IDA modules already in sys.modules
-    may spuriously fail to resolve when many imports hit the hook in quick
-    succession.
-
-    Thread-safe: a lock prevents concurrent ``__import__`` swaps.
-
-    Usage::
-
-        with shiboken_bypass():
-            provider.ensure_ready()   # safely imports SDK packages
-    """
-    with _shiboken_lock:
-        saved = builtins.__import__
-        builtins.__import__ = importlib.__import__
-        try:
-            yield
-        finally:
-            builtins.__import__ = saved
 
 
 def run_in_background(func: Callable[..., Any], *args: Any, **kwargs: Any) -> threading.Thread:

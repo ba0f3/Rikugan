@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import importlib
+
 PLUGIN_NAME = "IRIS"
 PLUGIN_VERSION = "0.1.0"
 PLUGIN_HOTKEY = "Ctrl+Shift+I"
@@ -25,15 +27,16 @@ MCP_TOOL_PREFIX = "mcp_"
 MCP_DEFAULT_TIMEOUT = 30.0
 
 # Whether the IDA SDK is importable. Set once at import time.
+# Uses importlib.import_module() to bypass Shiboken's __import__ hook.
 try:
-    import ida_kernwin  # noqa: F401
+    importlib.import_module("ida_kernwin")
     IDA_AVAILABLE = True
 except ImportError:
     IDA_AVAILABLE = False
 
 # Whether the Hex-Rays decompiler SDK is importable.
 try:
-    import ida_hexrays  # noqa: F401
+    importlib.import_module("ida_hexrays")
     HAS_HEXRAYS = True
 except ImportError:
     HAS_HEXRAYS = False

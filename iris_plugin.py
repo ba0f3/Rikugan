@@ -6,10 +6,43 @@ All iris.* imports are deferred to avoid crashes during plugin enumeration.
 
 import builtins
 import importlib
+import threading
 
 import idaapi
 
-_real_import = importlib.__import__
+# ---------------------------------------------------------------------------
+# Shiboken __import__ hook re-entrancy guard
+# ---------------------------------------------------------------------------
+# PySide6/Shiboken6 patches builtins.__import__ with a hook.  When this
+# hook is invoked during Qt signal dispatch (e.g. submit_requested.emit()),
+# and the connected slot's code triggers an import, the hook re-enters
+# itself.  After 3-4 levels of nesting the hook accesses freed memory
+# (UAF → SIGSEGV in ___lldb_unnamed_symbol945, address looks like ASCII
+# string fragment — type-name pointer corruption).
+#
+# Fix: wrap the hook so that first-level calls go through Shiboken
+# normally (preserving PySide6 module wrapping), but nested calls
+# (re-entrant) are redirected to CPython's standard import, avoiding
+# the corruption.  Installed once and never removed.
+
+_import_guard = threading.local()
+_shiboken_import = builtins.__import__
+
+
+def _guarded_import(*args, **kwargs):
+    if getattr(_import_guard, "active", False):
+        # Re-entrant call — bypass Shiboken's hook
+        return importlib.__import__(*args, **kwargs)
+    _import_guard.active = True
+    try:
+        return _shiboken_import(*args, **kwargs)
+    finally:
+        _import_guard.active = False
+
+
+_guarded_import._iris_guarded = True  # marker to avoid double-wrapping
+if not getattr(builtins.__import__, "_iris_guarded", False):
+    builtins.__import__ = _guarded_import
 
 
 class IRISPlugmod(idaapi.plugmod_t):
@@ -41,41 +74,39 @@ class IRISPlugmod(idaapi.plugmod_t):
                 self._panel.show()
                 return
 
-            # Bulk-load all iris.* modules with Shiboken's __import__ hook
-            # temporarily replaced by CPython's real import.
+            # Bulk-load all iris.* modules via importlib.import_module().
             #
-            # Why: Shiboken's hook intercepts every `import` / `from X import Y`
-            # in the process.  When dozens of iris modules load simultaneously
-            # (each triggering transitive ida_*/PySide6 lookups through the hook),
-            # Shiboken's internal state can corrupt — IDA modules that are
-            # already in sys.modules fail to resolve, causing spurious
-            # "No module named 'ida_...'" errors on the first open attempt.
+            # importlib.import_module() routes through CPython's internal
+            # _gcd_import(), which does NOT call builtins.__import__.  This
+            # means Shiboken's __import__ hook is never invoked, avoiding
+            # both the UAF crash (from swapping builtins.__import__) and the
+            # spurious "No module named 'ida_...'" errors (from Shiboken's
+            # hook failing to resolve IDA modules during bulk loading).
             #
-            # The bypass swaps builtins.__import__ to importlib.__import__
-            # (CPython's C-level import) for the duration of the bulk load.
-            # This is safe because:
-            #   - PySide6/IDA modules are already loaded; lookups are cache hits
-            #   - iris.* modules use importlib.import_module() (bypasses the hook
-            #     natively) and their transitive `from` imports resolve from
-            #     sys.modules with zero nesting through either hook
-            #   - The swap is short-lived and runs only on the main thread
-            _log("_toggle_panel: importing iris modules (Shiboken bypass)")
-            saved = builtins.__import__
-            builtins.__import__ = _real_import
-            try:
-                import pkgutil
-                import iris
-                for _finder, modname, _ispkg in pkgutil.walk_packages(
-                    iris.__path__, prefix="iris."
+            # All ida_* imports inside iris modules also use
+            # importlib.import_module() for the same reason.
+            _log("_toggle_panel: importing iris modules")
+            import pkgutil
+            import iris
+
+            # Use iter_modules (discovery only, no __import__) + manual
+            # recursion via importlib.import_module().  pkgutil.walk_packages()
+            # calls __import__() internally for sub-packages, which goes
+            # through Shiboken's hook and can trigger UAF crashes.
+            def _load_submodules(pkg):
+                for _finder, modname, ispkg in pkgutil.iter_modules(
+                    pkg.__path__, prefix=pkg.__name__ + "."
                 ):
                     try:
-                        importlib.import_module(modname)
+                        mod = importlib.import_module(modname)
+                        if ispkg:
+                            _load_submodules(mod)
                     except Exception:
                         pass  # Non-critical: skip modules that fail to load
-                _log("_toggle_panel: all iris modules loaded")
-                from iris.ui.panel import IRISPanel
-            finally:
-                builtins.__import__ = saved
+
+            _load_submodules(iris)
+            _log("_toggle_panel: all iris modules loaded")
+            IRISPanel = importlib.import_module("iris.ui.panel").IRISPanel
 
             _log("_toggle_panel: creating IRISPanel()")
             self._panel = IRISPanel()
@@ -88,8 +119,9 @@ class IRISPlugmod(idaapi.plugmod_t):
             tb_str = traceback.format_exc()
             idaapi.msg(f"[IRIS] Failed to open panel: {e}\n{tb_str}\n")
             try:
-                from iris.core.logging import log_error
-                log_error(f"Failed to open panel: {e}\n{tb_str}")
+                importlib.import_module("iris.core.logging").log_error(
+                    f"Failed to open panel: {e}\n{tb_str}"
+                )
             except Exception:
                 try:
                     import os
@@ -118,8 +150,7 @@ def _log(msg: str) -> None:
     """Best-effort log to IDA output and debug file."""
     idaapi.msg(f"[IRIS] {msg}\n")
     try:
-        from iris.core.logging import log_trace
-        log_trace(msg)
+        importlib.import_module("iris.core.logging").log_trace(msg)
     except Exception:
         pass  # noqa: S110 — logging not yet available during bootstrap
 

@@ -5,14 +5,15 @@ Data-driven table of 9 context-menu actions under IRIS/.
 
 from __future__ import annotations
 
+import importlib
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 try:
-    import ida_funcs
-    import ida_kernwin
-    import ida_name
-    import idaapi
-    import idc
+    ida_funcs = importlib.import_module("ida_funcs")
+    ida_kernwin = importlib.import_module("ida_kernwin")
+    ida_name = importlib.import_module("ida_name")
+    idaapi = importlib.import_module("idaapi")
+    idc = importlib.import_module("idc")
     _HAS_IDA = True
 except ImportError:
     _HAS_IDA = False

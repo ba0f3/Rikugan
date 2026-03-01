@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 import json
 import os
 import subprocess
@@ -83,7 +84,7 @@ class AnthropicProvider(LLMProvider):
     def _get_client(self):
         if self._client is None:
             try:
-                import anthropic
+                anthropic = importlib.import_module("anthropic")
             except ImportError:
                 raise ProviderError(
                     "anthropic package not installed. Run: pip install anthropic",
@@ -252,7 +253,7 @@ class AnthropicProvider(LLMProvider):
 
     def _handle_api_error(self, e: Exception) -> NoReturn:
         """Raise the appropriate IRIS error from an Anthropic API error."""
-        import anthropic
+        anthropic = importlib.import_module("anthropic")
 
         if isinstance(e, anthropic.AuthenticationError):
             raise AuthenticationError(provider="anthropic") from e

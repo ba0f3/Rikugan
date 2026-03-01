@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 import json
 import os
 from typing import Any, Dict, Generator, List, NoReturn, Optional
@@ -24,7 +25,7 @@ class GeminiProvider(LLMProvider):
     def _get_client(self):
         if self._client is None:
             try:
-                import google.generativeai as genai
+                genai = importlib.import_module("google.generativeai")
             except ImportError:
                 raise ProviderError(
                     "google-generativeai package not installed. Run: pip install google-generativeai",
@@ -89,7 +90,7 @@ class GeminiProvider(LLMProvider):
         """
         # Prefer typed exception checks from google.api_core.exceptions
         try:
-            from google.api_core import exceptions as gexc
+            gexc = importlib.import_module("google.api_core.exceptions")
             if isinstance(e, (gexc.Unauthenticated, gexc.PermissionDenied)):
                 raise AuthenticationError(provider="gemini") from e
             if isinstance(e, gexc.ResourceExhausted):

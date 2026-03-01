@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 from typing import Annotated
 
 from ..core.errors import ToolError
@@ -9,8 +10,8 @@ from .base import tool
 
 _HAS_HEXRAYS = False
 try:
-    import ida_hexrays
-    import ida_lines
+    ida_hexrays = importlib.import_module("ida_hexrays")
+    ida_lines = importlib.import_module("ida_lines")
     _HAS_HEXRAYS = True
 except ImportError:
     pass

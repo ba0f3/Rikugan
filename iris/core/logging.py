@@ -6,6 +6,7 @@ write so the last line survives even if IDA crashes hard (SIGSEGV).
 
 from __future__ import annotations
 
+import importlib
 import logging
 import os
 import sys
@@ -16,7 +17,7 @@ from typing import Optional
 
 from ..constants import IDA_AVAILABLE as _IDA_AVAILABLE
 if _IDA_AVAILABLE:
-    import ida_kernwin
+    ida_kernwin = importlib.import_module("ida_kernwin")
 
 _logger: Optional[logging.Logger] = None
 
@@ -24,7 +25,7 @@ _logger: Optional[logging.Logger] = None
 
 def _log_file_path() -> str:
     try:
-        import idaapi
+        idaapi = importlib.import_module("idaapi")
         base = idaapi.get_user_idadir()
     except Exception:
         base = os.path.join(os.path.expanduser("~"), ".idapro")

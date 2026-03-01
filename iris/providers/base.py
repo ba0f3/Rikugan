@@ -6,7 +6,6 @@ from abc import ABC, abstractmethod
 from typing import Any, Dict, Generator, List, Optional, Tuple
 
 from ..core.logging import log_debug
-from ..core.thread_safety import shiboken_bypass
 from ..core.types import Message, ModelInfo, ProviderCapabilities, StreamChunk, TokenUsage
 
 
@@ -113,12 +112,8 @@ class LLMProvider(ABC):
         packages (httpx, h2, ssl …) are first imported from a non-main
         thread, so providers that lazy-import SDK packages override
         ``_init_client`` to force the import on the caller's thread.
-
-        The Shiboken bypass is applied here so callers don't need to know
-        about the PySide6 import hook workaround.
         """
-        with shiboken_bypass():
-            self._init_client()
+        self._init_client()
 
     def _init_client(self) -> None:
         """Pre-import SDK and create client. Delegates to ``_get_client()``."""

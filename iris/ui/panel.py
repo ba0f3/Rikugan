@@ -1,13 +1,13 @@
 """Main IRIS panel: dockable PluginForm with chat, input, and context bar.
 
-All iris.* imports are at module level.  This module is imported during the
-Shiboken bypass window in iris_plugin._toggle_panel(), so every ``from``
-statement executes through CPython's real __import__ — not the Shiboken hook
-that causes SIGSEGV on Python 3.14.
+All iris.* imports are at module level.  All ida_* imports use
+importlib.import_module() to bypass Shiboken's __import__ hook, avoiding
+the UAF crash on Python 3.14 / PySide6.
 """
 
 from __future__ import annotations
 
+import importlib
 import threading
 from typing import Optional
 
@@ -25,7 +25,7 @@ from ..core.logging import log_error, log_info, log_debug
 from ..agent.turn import TurnEvent
 
 try:
-    import idaapi
+    idaapi = importlib.import_module("idaapi")
     _HAS_IDA = True
 except ImportError:
     _HAS_IDA = False

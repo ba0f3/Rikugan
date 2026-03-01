@@ -2,18 +2,19 @@
 
 from __future__ import annotations
 
+import importlib
 from typing import Annotated
 
 from .base import tool
 
 
 try:
-    import ida_ida
-    import ida_nalt
-    import ida_segment
-    import idaapi
-    import idautils
-    import idc
+    ida_ida = importlib.import_module("ida_ida")
+    ida_nalt = importlib.import_module("ida_nalt")
+    ida_segment = importlib.import_module("ida_segment")
+    idaapi = importlib.import_module("idaapi")
+    idautils = importlib.import_module("idautils")
+    idc = importlib.import_module("idc")
 except ImportError:
     pass
 

@@ -2,16 +2,17 @@
 
 from __future__ import annotations
 
+import importlib
 from typing import Annotated
 
 from .base import tool
 
 
 try:
-    import ida_funcs
-    import ida_name
-    import ida_xref
-    import idautils
+    ida_funcs = importlib.import_module("ida_funcs")
+    ida_name = importlib.import_module("ida_name")
+    ida_xref = importlib.import_module("ida_xref")
+    idautils = importlib.import_module("idautils")
 except ImportError:
     pass
 

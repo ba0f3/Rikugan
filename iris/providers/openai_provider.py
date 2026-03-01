@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 import json
 import os
 from typing import Any, Dict, Generator, List, NoReturn, Optional
@@ -24,7 +25,7 @@ class OpenAIProvider(LLMProvider):
     def _get_client(self):
         if self._client is None:
             try:
-                import openai
+                openai = importlib.import_module("openai")
             except ImportError:
                 raise ProviderError(
                     "openai package not installed. Run: pip install openai",
@@ -144,7 +145,7 @@ class OpenAIProvider(LLMProvider):
         )
 
     def _handle_api_error(self, e: Exception) -> NoReturn:
-        import openai
+        openai = importlib.import_module("openai")
         if isinstance(e, openai.AuthenticationError):
             raise AuthenticationError(provider="openai") from e
         if isinstance(e, openai.RateLimitError):

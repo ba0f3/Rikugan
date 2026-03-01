@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import builtins
 import os
 import sys
 import threading
@@ -12,7 +11,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from tests.mocks.ida_mock import install_ida_mocks
 install_ida_mocks()
 
-from iris.core.thread_safety import idasync, shiboken_bypass, run_in_background
+from iris.core.thread_safety import idasync, run_in_background
 
 
 class TestIdasync(unittest.TestCase):
@@ -46,27 +45,6 @@ class TestIdasync(unittest.TestCase):
 
         self.assertEqual(greet("world"), "hello world")
         self.assertEqual(greet("world", greeting="hi"), "hi world")
-
-
-class TestShibokenBypass(unittest.TestCase):
-    def test_restores_import_after_context(self):
-        original = builtins.__import__
-        with shiboken_bypass():
-            # Inside context, __import__ should be the real CPython one
-            pass
-        self.assertIs(builtins.__import__, original)
-
-    def test_restores_import_on_exception(self):
-        original = builtins.__import__
-        with self.assertRaises(RuntimeError):
-            with shiboken_bypass():
-                raise RuntimeError("test")
-        self.assertIs(builtins.__import__, original)
-
-    def test_import_works_inside_bypass(self):
-        with shiboken_bypass():
-            import json
-            self.assertIsNotNone(json)
 
 
 class TestRunInBackground(unittest.TestCase):
