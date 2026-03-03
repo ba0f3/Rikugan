@@ -112,7 +112,7 @@ class AgentLoop:
         """Save knowledge base and reset exploration state."""
         if self._exploration_state is not None:
             self._last_knowledge_base = self._exploration_state.knowledge_base
-        self._clear_exploration_state()
+            self._exploration_state = None
 
     def cancel(self) -> None:
         """Cancel the current run."""
@@ -651,10 +651,11 @@ class AgentLoop:
                     rollback_parts = []
                     for p in reversed(state.patches_applied):
                         if p.original_bytes:
+                            byte_literal = repr(bytes(p.original_bytes))
                             rollback_parts.append(
-                                f"import ida_bytes; ida_bytes.patch_bytes(0x{p.address:x}, {list(p.original_bytes)})"
+                                f"import ida_bytes; ida_bytes.patch_bytes(0x{p.address:x}, {byte_literal})"
                                 if self.host_name == "IDA Pro"
-                                else f"bv.write(0x{p.address:x}, {list(p.original_bytes)})"
+                                else f"bv.write(0x{p.address:x}, {byte_literal})"
                             )
                     if rollback_parts:
                         rollback_code = "; ".join(rollback_parts)
