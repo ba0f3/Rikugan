@@ -267,6 +267,10 @@ if _HAS_IDA:
             self._get_panel = panel_getter
             self._registered = False
 
+        def hook(self) -> bool:
+            self._register_actions()
+            return super().hook()
+
         def ready_to_run(self) -> None:
             self._register_actions()
 
