@@ -219,7 +219,7 @@ def discover_skills(skills_dir: str) -> List[SkillDefinition]:
             with open(md_path, "r", encoding="utf-8") as f:
                 text = f.read()
 
-            fm_text, _body = _split_frontmatter(text)
+            fm_text, body_text = _split_frontmatter(text)
             fm = _parse_frontmatter(fm_text) if fm_text else {}
 
             # Extract author/version from top-level or nested metadata
@@ -229,6 +229,13 @@ def discover_skills(skills_dir: str) -> List[SkillDefinition]:
             if isinstance(meta, dict):
                 author = author or meta.get("author", "")
                 version = version or meta.get("version", "")
+
+            # Build body eagerly from the already-read text to avoid a
+            # second file read.  Append reference files if present.
+            body_text = body_text.strip()
+            refs = _load_references(skill_dir)
+            if refs:
+                body_text += "\n\n" + refs
 
             skill = SkillDefinition(
                 name=fm.get("name", entry),
@@ -240,17 +247,9 @@ def discover_skills(skills_dir: str) -> List[SkillDefinition]:
                 author=author,
                 version=version,
                 frontmatter=fm,
-                _body=None,  # lazy
+                _body=body_text,
                 _md_path=md_path,
             )
-
-            # Validate the body is readable at discovery time so errors
-            # surface early instead of crashing when the skill is invoked.
-            try:
-                _ = skill.body
-            except Exception as e:
-                log_error(f"Skill /{entry} body unreadable, skipping: {e}")
-                continue
 
             skills.append(skill)
             log_debug(f"Discovered skill: /{entry} — {skill.description or '(no description)'}")
