@@ -105,8 +105,22 @@ def _sizeof_type(bv: Any, type_str: str, default: int = 4) -> int:
 
 
 def _parse_types_from_source(bv: Any, source: str) -> Dict[str, Any]:
-    """Parse C declarations into a {name: type} map."""
-    for meth_name in ("parse_types_from_source", "parseTypesFromSource"):
+    """Parse C declarations into a {name: type} map.
+
+    Tries the string-input API first (parse_types_from_string), then falls back
+    to the source-file variants for older BN builds.  Handles both the legacy
+    tuple return ``(types_dict, vars, funcs)`` and the BN 4.x
+    ``TypeParserResult`` object whose ``.types`` may be a list of
+    ``(QualifiedName, Type)`` pairs or ``ParsedTypeInfo`` objects.
+    """
+    # parse_types_from_string takes a C string — this is the correct method.
+    # parse_types_from_source takes a filename — only useful as a fallback.
+    for meth_name in (
+        "parse_types_from_string",
+        "parseTypesFromString",
+        "parse_types_from_source",
+        "parseTypesFromSource",
+    ):
         meth = getattr(bv, meth_name, None)
         if not callable(meth):
             continue
@@ -116,14 +130,32 @@ def _parse_types_from_source(bv: Any, source: str) -> Dict[str, Any]:
             log_debug(f"_parse_types_from_source {meth_name} failed: {e}")
             continue
 
+        # Legacy: (types_dict, variables, functions) tuple
         if isinstance(res, tuple) and res:
             maybe_types = res[0]
             if isinstance(maybe_types, dict):
                 return {str(k): v for k, v in maybe_types.items()}
 
+        # BN 4.x TypeParserResult: .types is a dict, list of pairs, or list of objects
         types_attr = getattr(res, "types", None)
-        if isinstance(types_attr, dict):
-            return {str(k): v for k, v in types_attr.items()}
+        if types_attr is not None:
+            if isinstance(types_attr, dict):
+                return {str(k): v for k, v in types_attr.items()}
+            # List of (QualifiedName, Type) pairs or ParsedTypeInfo objects
+            try:
+                result: Dict[str, Any] = {}
+                for item in types_attr:
+                    if isinstance(item, tuple) and len(item) == 2:
+                        result[str(item[0])] = item[1]
+                    else:
+                        iname = getattr(item, "name", None)
+                        itype = getattr(item, "type", None)
+                        if iname is not None and itype is not None:
+                            result[str(iname)] = itype
+                if result:
+                    return result
+            except Exception as e:
+                log_debug(f"_parse_types_from_source iterate types failed: {e}")
 
     raise ToolError("Binary Ninja failed to parse C declarations")
 
@@ -193,8 +225,11 @@ def _build_struct_decl(name: str, fields: List[Dict[str, Any]]) -> str:
 
 def _redefine_struct(bv: Any, name: str, fields: List[Dict[str, Any]]) -> bool:
     decl = _build_struct_decl(name, fields)
+    log_debug(f"_redefine_struct decl:\n{decl}")
     parsed = _define_types_from_source(bv, decl)
-    return name in parsed
+    log_debug(f"_redefine_struct parsed keys: {list(parsed.keys())}")
+    # BN may return the key as "Foo" or "struct Foo" depending on version
+    return name in parsed or f"struct {name}" in parsed
 
 
 @tool(category="types", mutating=True)
