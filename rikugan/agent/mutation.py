@@ -116,8 +116,8 @@ def build_reverse_record(
         return MutationRecord(
             tool_name=tool_name,
             arguments=args,
-            reverse_tool=tool_name,
-            reverse_arguments=args,
+            reverse_tool="",
+            reverse_arguments={},
             description=f"Rename data at {address} → {new_name}",
             reversible=False,
         )
@@ -183,6 +183,15 @@ def capture_pre_state(
             func = arguments.get("function_name", "")
             if func:
                 pre["old_comment"] = tool_executor("get_function_comment", {"function_name": func})
+        elif tool_name == "set_function_prototype":
+            target = arguments.get("name_or_address", "")
+            if target:
+                pre["old_prototype"] = tool_executor("get_function_prototype", {"name_or_address": target})
+        elif tool_name == "retype_variable":
+            func = arguments.get("function_name", "")
+            var = arguments.get("variable_name", "")
+            if func and var:
+                pre["old_type"] = tool_executor("get_variable_type", {"function_name": func, "variable_name": var})
     except Exception as e:
         log_debug(f"capture_pre_state failed for {tool_name}: {e}")
 

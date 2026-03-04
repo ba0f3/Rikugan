@@ -33,7 +33,7 @@ class OpenAIProvider(LLMProvider):
                 )
             if not self.api_key:
                 raise AuthenticationError(provider="openai")
-            kwargs = {"api_key": self.api_key}
+            kwargs = {"api_key": self.api_key, "timeout": 120.0}
             if self.api_base:
                 kwargs["base_url"] = self.api_base
             self._client = openai.OpenAI(**kwargs)
@@ -209,6 +209,7 @@ class OpenAIProvider(LLMProvider):
         client = self._get_client()
         kwargs = self._build_request_kwargs(messages, tools, temperature, max_tokens, system)
         kwargs["stream"] = True
+        kwargs["stream_options"] = {"include_usage": True}
 
         try:
             stream = client.chat.completions.create(**kwargs)

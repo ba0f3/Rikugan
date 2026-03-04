@@ -101,6 +101,7 @@ class AnthropicProvider(LLMProvider):
             kwargs: Dict[str, Any] = {}
             if self.api_base:
                 kwargs["base_url"] = self.api_base
+            kwargs["timeout"] = 120.0  # 2min vs SDK default 10min
             if self._auth_type == "oauth":
                 kwargs["auth_token"] = self.api_key
                 kwargs["default_headers"] = {"anthropic-beta": "oauth-2025-04-20"}
@@ -410,7 +411,7 @@ class AnthropicProvider(LLMProvider):
                             yield StreamChunk(
                                 tool_call_id=current_tool_id,
                                 tool_name=current_tool_name,
-                                tool_args_delta=tool_args_buf,
+                                tool_args_delta="",
                                 is_tool_call_end=True,
                             )
                             current_tool_id = None

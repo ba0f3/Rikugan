@@ -48,7 +48,7 @@ class OllamaProvider(OpenAICompatProvider):
         try:
             import urllib.request
             import json
-            base = self.api_base.rstrip("/v1").rstrip("/")
+            base = self.api_base.removesuffix("/v1").rstrip("/")
             url = f"{base}/api/tags"
             with urllib.request.urlopen(url, timeout=5) as resp:
                 data = json.loads(resp.read())
