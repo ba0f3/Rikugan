@@ -737,7 +737,7 @@ class AgentLoop:
     ) -> Generator[TurnEvent, None, None]:
         """Run the agent in exploration mode: explore → plan → patch → save."""
         state = ExplorationState(explore_only=explore_only)
-        state.max_explore_turns = self.session.config.exploration_turn_limit
+        state.max_explore_turns = self.config.exploration_turn_limit
         state.knowledge_base.user_goal = user_message
         self._exploration_state = state
 
