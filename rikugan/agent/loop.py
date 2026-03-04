@@ -1087,16 +1087,13 @@ class AgentLoop:
         last_usage: Optional[TokenUsage] = None
         raw_parts: Any = None
 
-        # Minify all text before sending to the provider to reduce token usage
-        minified_system = minify_text(system_prompt)
-
         # Estimate full in-memory context so compaction decisions work
         # even when provider streaming usage is missing.
         full_messages = minify_messages(
             self.session.get_messages_for_provider(context_window=0)
         )
         full_prompt_tokens = self._estimate_prompt_tokens(
-            full_messages, minified_system,
+            full_messages, system_prompt,
         )
         if full_prompt_tokens > 0:
             self._context_manager.update_usage(
@@ -1126,7 +1123,7 @@ class AgentLoop:
 
         # Estimate prompt size for providers that don't emit streaming usage.
         estimated_prompt_tokens = self._estimate_prompt_tokens(
-            provider_messages, minified_system,
+            provider_messages, system_prompt,
         )
         estimated_usage: Optional[TokenUsage] = None
         if estimated_prompt_tokens > 0:
@@ -1142,7 +1139,7 @@ class AgentLoop:
             tools=tools_schema if tools_schema else None,
             temperature=self.config.provider.temperature,
             max_tokens=self.config.provider.max_tokens,
-            system=minified_system,
+            system=system_prompt,
         )
 
         chunk_count = 0
@@ -1730,7 +1727,7 @@ class AgentLoop:
                 use_exploration_mode = True
 
             self.session.add_message(Message(role=Role.USER, content=user_message))
-            system_prompt = self._build_system_prompt()
+            system_prompt = minify_text(self._build_system_prompt())
             tools_schema = self._build_tools_schema(active_skill, use_exploration_mode)
             log_debug(f"Agent run started: {len(tools_schema)} tools, msg={user_message[:80]!r}")
 
