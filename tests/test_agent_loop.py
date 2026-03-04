@@ -13,11 +13,12 @@ from tests.mocks.ida_mock import install_ida_mocks
 install_ida_mocks()
 
 from rikugan.core.types import (
-    Message, ModelInfo, ProviderCapabilities, Role,
+    Message, ModelInfo, ProviderCapabilities, Role, ToolCall,
     StreamChunk, TokenUsage,
 )
 from rikugan.core.config import RikuganConfig
 from rikugan.agent.loop import AgentLoop, BackgroundAgentRunner
+from rikugan.agent.exploration_mode import ExplorationState
 from rikugan.agent.turn import TurnEvent, TurnEventType
 from rikugan.tools.base import tool, ParameterSchema, ToolDefinition
 from rikugan.tools.registry import ToolRegistry
@@ -70,6 +71,11 @@ def _text_response(text: str) -> List[StreamChunk]:
         StreamChunk(text=text),
         StreamChunk(usage=TokenUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15)),
     ]
+
+
+def _text_response_no_usage(text: str) -> List[StreamChunk]:
+    """Create a text response with no usage metadata (compat provider behavior)."""
+    return [StreamChunk(text=text)]
 
 
 def _tool_call_response(tool_name: str, args: Dict[str, Any], call_id: str = "call_1") -> List[StreamChunk]:
@@ -218,6 +224,42 @@ class TestAgentLoop(unittest.TestCase):
         usage_events = [e for e in events if e.type == TurnEventType.USAGE_UPDATE]
         self.assertTrue(len(usage_events) > 0)
         self.assertEqual(session.total_usage.total_tokens, 15)
+
+    def test_usage_fallback_when_provider_omits_usage(self):
+        provider = MockProvider(responses=[_text_response_no_usage("Hi")])
+        config = RikuganConfig()
+        config.auto_context = False
+        session = SessionState()
+        loop = AgentLoop(provider, ToolRegistry(), config, session)
+
+        events = list(loop.run("Hello"))
+        usage_events = [e for e in events if e.type == TurnEventType.USAGE_UPDATE]
+
+        # Local estimation should still drive token/context tracking.
+        self.assertGreater(len(usage_events), 0)
+        self.assertGreater(session.last_prompt_tokens, 0)
+        self.assertGreater(session.total_usage.total_tokens, 0)
+
+    def test_execute_python_requires_approval_even_in_explore_only(self):
+        provider = MockProvider()
+        loop = self._make_loop(provider)
+        loop._exploration_state = ExplorationState(explore_only=True)  # /explore context
+
+        tc = ToolCall(
+            id="call_approval_test",
+            name="execute_python",
+            arguments={"code": "print('hi')"},
+        )
+
+        gate = loop._wait_for_approval(tc)
+        event = next(gate)
+        self.assertEqual(event.type, TurnEventType.TOOL_APPROVAL_REQUEST)
+        self.assertEqual(event.tool_name, "execute_python")
+
+        loop.submit_tool_approval("allow")
+        with self.assertRaises(StopIteration) as done:
+            next(gate)
+        self.assertTrue(done.exception.value)
 
 
 class TestBackgroundAgentRunner(unittest.TestCase):

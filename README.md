@@ -77,32 +77,6 @@ Subagents run in complete isolation from the parent session. They are essentiall
 The result is a much deeper and faster analysis than a single agent could do alone — and it keeps the main context window clean.
 
 
-```mermaid
-stateDiagram-v2
-    direction LR
-
-    [*] --> EXPLORE : /modify or /explore
-
-    EXPLORE --> EXPLORE : report / rename / save
-    EXPLORE --> PLAN : phase_transition to plan
-
-    PLAN --> EXECUTE : plan ready
-
-    note right of PLAN
-        /explore stops here
-        read-only, no patching
-    end note
-
-    EXECUTE --> EXECUTE : patch and verify loop
-    EXECUTE --> SAVE : all patches applied
-
-    SAVE --> Done : Save All
-    SAVE --> Rollback : Discard All
-
-    Done --> [*]
-    Rollback --> [*]
-```
-
 During exploration, it also renames functions when it has high confidence about what a function actually does.
 
 ### Natural Language Patches/modding

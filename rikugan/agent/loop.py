@@ -1090,7 +1090,40 @@ class AgentLoop:
         self, system_prompt: str, tools_schema: Optional[List],
     ) -> Generator[TurnEvent, None, Tuple[str, List[ToolCall], Optional[TokenUsage], Any]]:
         """Stream one LLM call, yielding events (no retry logic)."""
-        # Compact context if approaching the token limit
+        assistant_text = ""
+        tool_calls: List[ToolCall] = []
+        current_tool_args: Dict[str, str] = {}
+        current_tool_names: Dict[str, str] = {}
+        last_usage: Optional[TokenUsage] = None
+        raw_parts: Any = None
+
+        # Minify all text before sending to the provider to reduce token usage
+        minified_system = minify_text(system_prompt)
+
+        def _build_provider_messages(trim_to_context: bool = True) -> List[Message]:
+            ctx_window = self.config.provider.context_window if trim_to_context else 0
+            return minify_messages(
+                self.session.get_messages_for_provider(
+                    context_window=ctx_window,
+                )
+            )
+
+        # Estimate full in-memory context (without trimming) so compaction
+        # decisions still work even when provider streaming usage is missing.
+        full_messages = _build_provider_messages(trim_to_context=False)
+        full_prompt_tokens = self._estimate_prompt_tokens(
+            full_messages,
+            minified_system,
+        )
+        if full_prompt_tokens > 0:
+            self._context_manager.update_usage(
+                TokenUsage(
+                    prompt_tokens=full_prompt_tokens,
+                    total_tokens=full_prompt_tokens,
+                )
+            )
+
+        # Compact context if approaching the token limit.
         if self._context_manager.should_compact():
             log_info(
                 f"Context compaction triggered (usage ratio: "
@@ -1100,20 +1133,25 @@ class AgentLoop:
                 self.session.messages
             )
 
-        assistant_text = ""
-        tool_calls: List[ToolCall] = []
-        current_tool_args: Dict[str, str] = {}
-        current_tool_names: Dict[str, str] = {}
-        last_usage: Optional[TokenUsage] = None
-        raw_parts: Any = None
+        # Rebuild prompt payload after possible compaction, this time with
+        # context-window trimming for the actual provider request.
+        provider_messages = _build_provider_messages(trim_to_context=True)
 
-        # Minify all text before sending to the provider to reduce token usage
-        provider_messages = minify_messages(
-            self.session.get_messages_for_provider(
-                context_window=self.config.provider.context_window,
-            )
+        # Some providers (especially OpenAI-compatible endpoints) don't emit
+        # streaming usage. Estimate prompt size locally so UI/context tracking
+        # still works.
+        estimated_prompt_tokens = self._estimate_prompt_tokens(
+            provider_messages,
+            minified_system,
         )
-        minified_system = minify_text(system_prompt)
+        estimated_usage: Optional[TokenUsage] = None
+        if estimated_prompt_tokens > 0:
+            estimated_usage = TokenUsage(
+                prompt_tokens=estimated_prompt_tokens,
+                total_tokens=estimated_prompt_tokens,
+            )
+            self._context_manager.update_usage(estimated_usage)
+            yield TurnEvent.usage_update(estimated_usage)
 
         stream = self.provider.chat_stream(
             messages=provider_messages,
@@ -1193,8 +1231,41 @@ class AgentLoop:
             if chunk.raw_parts is not None:
                 raw_parts = chunk.raw_parts
 
+        # If provider usage is missing or lacks prompt_tokens, keep the local
+        # estimate so session/context accounting remains meaningful.
+        if last_usage is None and estimated_usage is not None:
+            last_usage = estimated_usage
+        elif last_usage is not None and estimated_prompt_tokens > 0 and last_usage.prompt_tokens <= 0:
+            merged_total = (
+                last_usage.total_tokens
+                if last_usage.total_tokens > 0
+                else estimated_prompt_tokens + last_usage.completion_tokens
+            )
+            last_usage = TokenUsage(
+                prompt_tokens=estimated_prompt_tokens,
+                completion_tokens=last_usage.completion_tokens,
+                total_tokens=merged_total,
+                cache_read_tokens=last_usage.cache_read_tokens,
+                cache_creation_tokens=last_usage.cache_creation_tokens,
+            )
+            self._context_manager.update_usage(last_usage)
+            yield TurnEvent.usage_update(last_usage)
+
         log_debug(f"Stream done: {chunk_count} chunks, {len(assistant_text)} chars, {len(tool_calls)} tool calls")
         return (assistant_text, tool_calls, last_usage, raw_parts)
+
+    @staticmethod
+    def _estimate_prompt_tokens(provider_messages: List[Message], system_prompt: str) -> int:
+        """Estimate prompt token usage from provider payload for fallback accounting."""
+        try:
+            payload = json.dumps(
+                [m.to_dict() for m in provider_messages],
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+        except Exception:
+            payload = str(provider_messages)
+        return ContextWindowManager.estimate_tokens(f"{system_prompt}\n{payload}")
 
     @staticmethod
     def _describe_tool_call(name: str, args: Dict[str, Any]) -> str:
@@ -1238,12 +1309,6 @@ class AgentLoop:
         """
         # Skip prompt if user previously chose "Always Allow"
         if self._always_allow_scripts:
-            return True
-
-        # In explore-only mode, skip approval for execute_python
-        # (read-only analysis context — no binary writes)
-        if (self._exploration_state is not None
-                and self._exploration_state.explore_only):
             return True
 
         args_str = json.dumps(tc.arguments, indent=2)
