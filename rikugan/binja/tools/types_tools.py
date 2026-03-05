@@ -104,9 +104,55 @@ def _sizeof_type(bv: Any, type_str: str, default: int = 4) -> int:
     return default
 
 
+def _extract_types_dict(res: Any) -> Optional[Dict[str, Any]]:
+    """Extract a ``{name: type}`` dict from whatever ``parse_types_from_*`` returns.
+
+    Returns ``None`` when the format is not recognised so the caller can try
+    the next API variant.
+    """
+    if res is None:
+        return None
+
+    # Legacy BN 3.x: (types_dict, variables, functions) tuple
+    if isinstance(res, tuple) and res:
+        first = res[0]
+        if isinstance(first, dict):
+            return {str(k): v for k, v in first.items()}
+
+    # BN 4.x TypeParserResult: .types is a dict, list of (QualifiedName, Type) pairs,
+    # or list of ParsedTypeInfo objects
+    types_attr = getattr(res, "types", None)
+    if types_attr is None:
+        return None
+    if isinstance(types_attr, dict):
+        return {str(k): v for k, v in types_attr.items()}
+
+    result: Dict[str, Any] = {}
+    for item in types_attr:
+        if isinstance(item, tuple) and len(item) == 2:
+            result[str(item[0])] = item[1]
+        else:
+            iname = getattr(item, "name", None)
+            itype = getattr(item, "type", None)
+            if iname is not None and itype is not None:
+                result[str(iname)] = itype
+    return result
+
+
 def _parse_types_from_source(bv: Any, source: str) -> Dict[str, Any]:
-    """Parse C declarations into a {name: type} map."""
-    for meth_name in ("parse_types_from_source", "parseTypesFromSource"):
+    """Parse C declarations into a {name: type} map.
+
+    ``parse_types_from_string`` takes a C string and is tried first.
+    ``parse_types_from_source`` takes a filename and is kept only as a
+    last-resort fallback for older BN builds where the string variant may
+    not exist.
+    """
+    for meth_name in (
+        "parse_types_from_string",
+        "parseTypesFromString",
+        "parse_types_from_source",
+        "parseTypesFromSource",
+    ):
         meth = getattr(bv, meth_name, None)
         if not callable(meth):
             continue
@@ -116,23 +162,23 @@ def _parse_types_from_source(bv: Any, source: str) -> Dict[str, Any]:
             log_debug(f"_parse_types_from_source {meth_name} failed: {e}")
             continue
 
-        if isinstance(res, tuple) and res:
-            maybe_types = res[0]
-            if isinstance(maybe_types, dict):
-                return {str(k): v for k, v in maybe_types.items()}
-
-        types_attr = getattr(res, "types", None)
-        if isinstance(types_attr, dict):
-            return {str(k): v for k, v in types_attr.items()}
+        parsed = _extract_types_dict(res)
+        if parsed is not None:
+            return parsed
+        log_debug(f"_parse_types_from_source {meth_name} returned unrecognised format: {type(res)}")
 
     raise ToolError("Binary Ninja failed to parse C declarations")
 
 
 def _define_types_from_source(bv: Any, source: str) -> Dict[str, Any]:
     parsed = _parse_types_from_source(bv, source)
+    defined: Dict[str, Any] = {}
     for name, t in parsed.items():
-        define_user_type(bv, name, t)
-    return parsed
+        if define_user_type(bv, name, t):
+            defined[name] = t
+    if defined:
+        update_analysis_and_wait(bv)
+    return defined
 
 
 def _extract_struct_members(t: Any) -> List[Dict[str, Any]]:
@@ -191,10 +237,87 @@ def _build_struct_decl(name: str, fields: List[Dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
+def _parse_field_type(bv: Any, ftype_str: str) -> Any:
+    """Parse a field type string, trying with a dummy variable name if needed."""
+    # Try with a dummy variable name first (BN often requires a declaration)
+    last_err: Exception | None = None
+    for src in (f"{ftype_str} __rikugan_tmp", ftype_str):
+        try:
+            t, _ = parse_type_string(bv, src)
+            return t
+        except Exception as exc:
+            last_err = exc
+            continue
+    if last_err is not None:
+        log_debug(f"_parse_field_type: could not parse {ftype_str!r}: {last_err}")
+    return None
+
+
+def _redefine_struct_with_builder(bv: Any, name: str, fields: List[Dict[str, Any]]) -> bool:
+    """Build a struct using BN's StructureBuilder API (reliable, version-agnostic)."""
+    bn = get_bn_module()
+    if bn is None:
+        return False
+    try:
+        sb_cls = getattr(bn, "StructureBuilder", None)
+        if sb_cls is None:
+            return False
+        sb = sb_cls.create()
+        added = 0
+        for f in fields:
+            fname = f["name"]
+            ftype_str = f.get("type", "int")
+            off = f.get("offset")
+            ftype = _parse_field_type(bv, ftype_str)
+            if ftype is None:
+                log_debug(f"_redefine_struct_with_builder: skipping field {fname!r}, "
+                          f"could not parse type {ftype_str!r}")
+                continue
+            if isinstance(off, int) and off >= 0:
+                insert = getattr(sb, "insert", None)
+                if callable(insert):
+                    insert(off, ftype, fname)
+                    added += 1
+                    continue
+            append = getattr(sb, "append", None)
+            if callable(append):
+                append(ftype, fname)
+                added += 1
+        if added == 0:
+            log_debug("_redefine_struct_with_builder: no fields added, skipping define")
+            return False
+        struct_type_fn = getattr(bn, "Type", None)
+        if struct_type_fn is not None:
+            struct_type_fn = getattr(struct_type_fn, "structure_type", None)
+        if callable(struct_type_fn):
+            struct_type = struct_type_fn(sb)
+        else:
+            struct_type = sb.immutable_copy() if hasattr(sb, "immutable_copy") else sb
+        ok = define_user_type(bv, name, struct_type)
+        if ok:
+            update_analysis_and_wait(bv)
+        return ok
+    except Exception as e:
+        log_debug(f"_redefine_struct_with_builder failed: {e}")
+        return False
+
+
 def _redefine_struct(bv: Any, name: str, fields: List[Dict[str, Any]]) -> bool:
+    # Primary: use StructureBuilder directly — reliably adds fields across BN versions.
+    if _redefine_struct_with_builder(bv, name, fields):
+        # Verify fields were registered; fall through to C-parse path if empty.
+        t = _get_type_by_name(bv, name)
+        if t is not None and _extract_struct_members(t):
+            return True
+        log_debug("_redefine_struct_with_builder produced empty struct, trying C-parse path")
+
+    # Fallback: parse C declaration and register via define_user_type.
     decl = _build_struct_decl(name, fields)
+    log_debug(f"_redefine_struct C-parse decl:\n{decl}")
     parsed = _define_types_from_source(bv, decl)
-    return name in parsed
+    log_debug(f"_redefine_struct parsed keys: {list(parsed.keys())}")
+    # BN may return the key as "Foo" or "struct Foo" depending on version
+    return name in parsed or f"struct {name}" in parsed
 
 
 @tool(category="types", mutating=True)

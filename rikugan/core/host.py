@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import importlib
 import os
+import sys
 import threading
 from pathlib import Path
 from typing import Any, Callable, Optional
@@ -27,11 +28,11 @@ try:
     # Cache frequently-used IDA modules to avoid repeated importlib lookups
     try:
         _idc = importlib.import_module("idc")
-    except Exception:
+    except ImportError:
         pass
     try:
         _ida_kernwin = importlib.import_module("ida_kernwin")
-    except Exception:
+    except ImportError:
         pass
 except Exception:
     try:
@@ -155,7 +156,7 @@ def navigate_to(address: int) -> bool:
                     set_current_address(ea)
                 return ok
             except Exception as e:
-                import sys; sys.stderr.write(f"[Rikugan] navigate_to_address cb failed at 0x{ea:x}: {e}\n")
+                sys.stderr.write(f"[Rikugan] navigate_to_address cb failed at 0x{ea:x}: {e}\n")
         return False
 
     return False
@@ -176,7 +177,7 @@ def get_user_config_base_dir() -> str:
             if callable(user_directory):
                 return user_directory()
         except Exception as e:
-            import sys; sys.stderr.write(f"[Rikugan] get_user_config_base_dir failed: {e}\n")
+            sys.stderr.write(f"[Rikugan] get_user_config_base_dir failed: {e}\n")
         return os.path.join(str(Path.home()), ".binaryninja")
 
     return os.path.join(str(Path.home()), ".idapro")
@@ -210,7 +211,7 @@ def get_database_path() -> str:
                     if path:
                         return str(path)
         except Exception as e:
-            import sys; sys.stderr.write(f"[Rikugan] get_database_path file attr failed: {e}\n")
+            sys.stderr.write(f"[Rikugan] get_database_path file attr failed: {e}\n")
 
         for attr in ("file_name", "filename", "path"):
             try:
@@ -218,6 +219,72 @@ def get_database_path() -> str:
                 if path:
                     return str(path)
             except Exception as e:
-                import sys; sys.stderr.write(f"[Rikugan] get_database_path {attr} failed: {e}\n")
+                sys.stderr.write(f"[Rikugan] get_database_path {attr} failed: {e}\n")
 
     return ""
+
+
+def get_database_instance_id() -> str:
+    """Read the Rikugan instance UUID stored in the current IDB/BNDB.
+
+    Returns '' if none is stored yet.
+    """
+    if is_ida():
+        try:
+            idaapi = _idaapi
+            if idaapi is None:
+                return ""
+            node = idaapi.netnode("$ rikugan", 0, False)
+            if node == idaapi.BADNODE:
+                return ""
+            val = node.supstr(0)
+            return val if val else ""
+        except Exception:
+            return ""
+
+    if is_binary_ninja():
+        bv = get_binary_ninja_view()
+        if bv is None:
+            return ""
+        try:
+            val = bv.query_metadata("rikugan_db_id")
+            if val is None:
+                return ""
+            # query_metadata may return a Metadata wrapper; unwrap if needed.
+            raw = getattr(val, "value", val)
+            return str(raw) if raw else ""
+        except (KeyError, Exception):
+            return ""
+
+    return ""
+
+
+def set_database_instance_id(instance_id: str) -> bool:
+    """Store a Rikugan instance UUID in the current IDB/BNDB.
+
+    Returns True on success.
+    """
+    if is_ida():
+        try:
+            idaapi = _idaapi
+            if idaapi is None:
+                return False
+            node = idaapi.netnode("$ rikugan", 0, True)
+            node.supset(0, instance_id)
+            return True
+        except Exception as e:
+            sys.stderr.write(f"[Rikugan] set_database_instance_id IDA failed: {e}\n")
+            return False
+
+    if is_binary_ninja():
+        bv = get_binary_ninja_view()
+        if bv is None:
+            return False
+        try:
+            bv.store_metadata("rikugan_db_id", instance_id)
+            return True
+        except Exception as e:
+            sys.stderr.write(f"[Rikugan] set_database_instance_id BN failed: {e}\n")
+            return False
+
+    return False

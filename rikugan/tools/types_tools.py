@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import importlib
 import json
-from typing import Annotated, List, Optional
+from typing import Annotated, Any, Dict, List, Optional, Tuple
 
 from ..core.errors import ToolError
 from ..core.logging import log_debug
@@ -44,6 +44,28 @@ try:
     ida_enum = importlib.import_module("ida_enum")
 except ImportError as e:
     log_debug(f"ida_enum not available (IDA 9.x+): {e}")
+
+if _HAS_HEXRAYS:
+    class _OffsetCollector(ida_hexrays.ctree_visitor_t):  # type: ignore[misc]
+        """ctree visitor that collects pointer field access offsets and sizes."""
+
+        def __init__(self) -> None:
+            super().__init__(ida_hexrays.CV_FAST)
+            self.accesses: Dict[int, tuple] = {}  # offset -> (size, count)
+
+        def visit_expr(self, expr: Any) -> int:
+            if expr.op in (ida_hexrays.cot_memref, ida_hexrays.cot_memptr):
+                off = expr.m
+                size = expr.ptrsize if hasattr(expr, "ptrsize") else 0
+                if size == 0:
+                    tif = expr.type
+                    size = tif.get_size() if tif else 4
+                if off in self.accesses:
+                    prev_size, prev_count = self.accesses[off]
+                    self.accesses[off] = (max(prev_size, size), prev_count + 1)
+                else:
+                    self.accesses[off] = (size, 1)
+            return 0
 
 
 # ---------------------------------------------------------------------------
@@ -708,10 +730,28 @@ def apply_type_to_variable(
 
     for lv in cfunc.get_lvars():
         if lv.name == var_name:
-            ok = ida_hexrays.set_lvar_type(cfunc.entry_ea, lv, tif)
-            if ok:
-                return f"Set type of '{var_name}' to '{type_str}'"
-            return f"Failed to set type on '{var_name}'"
+            # Approach 1: set_lvar_type (IDA 7.6+)
+            set_lvar_type_fn = getattr(ida_hexrays, "set_lvar_type", None)
+            if set_lvar_type_fn is not None:
+                ok = set_lvar_type_fn(cfunc.entry_ea, lv, tif)
+                if ok:
+                    return f"Set type of '{var_name}' to '{type_str}'"
+
+            # Approach 2: lvar_saved_info_t + modify_user_lvars (older IDA builds)
+            try:
+                lsi = ida_hexrays.lvar_saved_info_t()
+                lsi.ll = lv  # lvar_t inherits lvar_locator_t
+                lsi.type = tif
+                lsi.size = tif.get_size()
+                lvvec = ida_hexrays.lvar_uservec_t()
+                lvvec.push_back(lsi)
+                ok2 = ida_hexrays.modify_user_lvars(cfunc.entry_ea, lvvec)
+                if ok2:
+                    return f"Set type of '{var_name}' to '{type_str}'"
+            except Exception as fb_e:
+                log_debug(f"modify_user_lvars fallback failed for '{var_name}': {fb_e}")
+
+            return f"Failed to retype '{var_name}' — try right-click → Set lvar type in the decompiler"
 
     return f"Variable '{var_name}' not found in 0x{ea:x}"
 
@@ -765,27 +805,7 @@ def suggest_struct_from_accesses(
         return f"Decompilation failed: {e}"
 
     # Visitor to collect member access offsets
-    class OffsetCollector(ida_hexrays.ctree_visitor_t):
-        def __init__(self):
-            super().__init__(ida_hexrays.CV_FAST)
-            self.accesses = {}  # offset -> (size, count)
-
-        def visit_expr(self, expr):
-            # Look for ptr+offset patterns (memref/memptr)
-            if expr.op in (ida_hexrays.cot_memref, ida_hexrays.cot_memptr):
-                off = expr.m
-                size = expr.ptrsize if hasattr(expr, "ptrsize") else 0
-                if size == 0:
-                    tif = expr.type
-                    size = tif.get_size() if tif else 4
-                if off in self.accesses:
-                    prev_size, prev_count = self.accesses[off]
-                    self.accesses[off] = (max(prev_size, size), prev_count + 1)
-                else:
-                    self.accesses[off] = (size, 1)
-            return 0
-
-    collector = OffsetCollector()
+    collector = _OffsetCollector()
     collector.apply_to(cfunc.body, None)
 
     if not collector.accesses:

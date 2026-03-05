@@ -23,3 +23,5 @@ QT_BINDING = "PySide6"
 
 def is_pyside6() -> bool:
     return True
+
+

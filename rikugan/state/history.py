@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional
 from ..constants import SESSION_SCHEMA_VERSION
 from ..core.config import RikuganConfig
 from ..core.logging import log_debug
+from ..core.types import Message
 from .session import SessionState
 
 
@@ -44,6 +45,7 @@ class SessionHistory:
             "provider_name": session.provider_name,
             "model_name": session.model_name,
             "idb_path": db_path,
+            "db_instance_id": session.db_instance_id,
             "current_turn": session.current_turn,
             "metadata": session.metadata,
             "messages": [m.to_dict() for m in session.messages],
@@ -65,13 +67,13 @@ class SessionHistory:
         except (json.JSONDecodeError, OSError) as exc:
             log_debug(f"Failed to load session {session_id}: {exc}")
             return None
-        from ..core.types import Message
         session = SessionState(
             id=data["id"],
             created_at=data.get("created_at", 0),
             provider_name=data.get("provider_name", ""),
             model_name=data.get("model_name", ""),
             idb_path=data.get("idb_path", ""),
+            db_instance_id=data.get("db_instance_id", ""),
             current_turn=data.get("current_turn", 0),
             metadata=data.get("metadata", {}),
         )
@@ -79,8 +81,10 @@ class SessionHistory:
             session.messages.append(Message.from_dict(md))
         return session
 
-    def list_sessions(self, idb_path: str = "") -> List[Dict[str, Any]]:
-        """List saved session summaries, optionally filtered by IDB path."""
+    def list_sessions(
+        self, idb_path: str = "", db_instance_id: str = ""
+    ) -> List[Dict[str, Any]]:
+        """List saved session summaries, filtered by IDB path and instance ID."""
         sessions = []
         normalized_target = _normalize_db_path(idb_path)
         for fname in sorted(os.listdir(self._dir), reverse=True):
@@ -96,15 +100,22 @@ class SessionHistory:
                     "provider": data.get("provider_name", ""),
                     "model": data.get("model_name", ""),
                     "idb_path": _normalize_db_path(data.get("idb_path", "")),
+                    "db_instance_id": data.get("db_instance_id", ""),
                     "messages": len(data.get("messages", [])),
                     "description": data.get("description", ""),
                 }
-                # Strict filter: only return sessions matching the exact idb_path
-                if normalized_target:
+                # When db_instance_id is provided, use it as the primary key
+                # (UUIDs are globally unique, so path matching is redundant).
+                # This handles BN where the path may change between raw binary
+                # and .bndb across sessions.
+                if db_instance_id:
+                    if entry["db_instance_id"] != db_instance_id:
+                        continue
+                elif normalized_target:
                     if entry["idb_path"] != normalized_target:
                         continue
                 else:
-                    # No idb_path given — only return sessions with no idb_path
+                    # No idb_path or instance_id — only return sessions with no idb_path
                     if entry["idb_path"]:
                         continue
                 sessions.append(entry)
@@ -113,9 +124,11 @@ class SessionHistory:
                 continue
         return sessions
 
-    def get_latest_session(self, idb_path: str = "") -> Optional[SessionState]:
+    def get_latest_session(
+        self, idb_path: str = "", db_instance_id: str = ""
+    ) -> Optional[SessionState]:
         """Load the most recently saved session for this IDB."""
-        sessions = self.list_sessions(idb_path=idb_path)
+        sessions = self.list_sessions(idb_path=idb_path, db_instance_id=db_instance_id)
         if not sessions:
             return None
         sessions.sort(key=lambda s: s.get("created_at", 0), reverse=True)
