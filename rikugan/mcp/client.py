@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import os
+import sys
 import threading
 from typing import Any, Dict, List, Optional
 
@@ -19,6 +21,22 @@ try:
     _HAS_MCP = True
 except ImportError:
     _HAS_MCP = False
+
+
+def _safe_errlog():
+    """Return a file-like object usable as subprocess stderr.
+
+    IDA/Binary Ninja replace ``sys.stderr`` with custom objects
+    (``IDAPythonStdOut``) that lack ``fileno()``.  ``anyio.open_process()``
+    passes ``stderr=`` directly to the OS, which requires a real fd.
+    Fall back to ``subprocess.DEVNULL`` when the host's stderr is not a
+    real file descriptor.
+    """
+    try:
+        sys.stderr.fileno()
+        return sys.stderr
+    except (AttributeError, OSError):
+        return open(os.devnull, "w")
 
 
 class MCPToolSchema:
@@ -200,8 +218,9 @@ class MCPClient:
             env=self.config.env if self.config.env else None,
         )
 
+        errlog = _safe_errlog()
         try:
-            async with stdio_client(server_params) as (read_stream, write_stream):
+            async with stdio_client(server_params, errlog=errlog) as (read_stream, write_stream):
                 async with ClientSession(read_stream, write_stream) as session:
                     self._session = session
 
@@ -232,3 +251,10 @@ class MCPClient:
                 self._ready.set()
             else:
                 log_error(f"MCP[{self.name}]: session error: {e}")
+        finally:
+            # Close the devnull fd if we opened one (not sys.stderr)
+            if errlog is not sys.stderr:
+                try:
+                    errlog.close()
+                except Exception:
+                    pass
