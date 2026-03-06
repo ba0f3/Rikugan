@@ -372,6 +372,16 @@ Rikugan supports Anthropic, OpenAI, Google Gemini, MiniMax, Ollama, and any Open
 - GPT-5.3 Codex
 - GPT-5.2
 
+### Context window usage display
+
+The context bar shows how much of the model's context window is currently in use. A few things to keep in mind:
+
+**Why the percentage can decrease during a long agentic run:**
+Rikugan automatically truncates old tool results to save context space — results older than 8 messages are cut to 500 characters. If the agent makes many tool calls in a single turn, earlier results get progressively trimmed, so the token count sent to the API on the next inner call may genuinely be smaller than the previous one. A drop in the percentage means the context manager reclaimed space, not that something went wrong.
+
+**Why Anthropic numbers are more accurate than other providers:**
+Claude uses [prompt caching](https://docs.anthropic.com/en/docs/build-with-claude/prompt-caching). The API reports three separate token buckets: fresh input tokens, cache-read tokens, and cache-creation tokens. Rikugan adds all three to compute the true context window usage, so the displayed percentage reflects the actual context occupancy — not just the uncached portion, which would otherwise appear to drop dramatically on cache hits.
+
 
 # Conclusion
 
