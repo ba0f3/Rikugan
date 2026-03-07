@@ -30,6 +30,7 @@ class MCPManager:
         self._configs: List[MCPServerConfig] = []
         self._clients: Dict[str, MCPClient] = {}
         self._lock = threading.Lock()
+        self._shut_down = False
 
     def load_config(self, path: str = "") -> int:
         """Load MCP config. Returns number of enabled servers found."""
@@ -48,6 +49,10 @@ class MCPManager:
         Each server's tools are registered into `registry` as they come online.
         Optional `on_complete(server_name, tool_count)` callback is called per server.
         """
+        if self._shut_down:
+            log_warning("MCP: start_servers called after shutdown — ignoring")
+            return
+
         for config in self._configs:
             if not config.enabled:
                 continue
@@ -108,6 +113,15 @@ class MCPManager:
                 log_error(f"MCP[{client.name}]: stop error: {e}")
 
         log_info("MCP: all servers stopped")
+
+    def shutdown(self) -> None:
+        """Stop all servers and prevent further starts.
+
+        Call this during application shutdown instead of ``stop_all()``
+        to ensure no new servers are started after cleanup.
+        """
+        self._shut_down = True
+        self.stop_all()
 
     def list_servers(self) -> List[str]:
         """List names of connected servers."""

@@ -1072,7 +1072,9 @@ class AgentLoop:
         try:
             result = self.tools.execute(tc.name, tc.arguments)
             is_error = False
-            self._consecutive_errors = 0
+            # Hysteresis: decrement instead of resetting so a single success
+            # after several failures doesn't fully clear the counter.
+            self._consecutive_errors = max(0, self._consecutive_errors - 1)
             if is_mutating:
                 record = build_reverse_record(tc.name, tc.arguments, pre_state)
                 if record is not None:
